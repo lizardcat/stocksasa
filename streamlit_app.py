@@ -1,80 +1,179 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.graph_objects as go
-import yfinance as yf
+import matplotlib.pyplot as plt
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
-from tensorflow.keras.optimizers import Adam
+import yfinance as yf
 
-st.set_page_config(page_title="Stock Prediction App", page_icon="📈")
+# Your existing functions here (data preparation, model creation, backtesting, etc.)
 
-@st.cache_data
-def fetch_stock_data(ticker, start_date, end_date):
-    return yf.download(ticker, start=start_date, end=end_date)
+def main():
+    st.title('Stock Price Prediction App')
 
-def engineer_features(stock_data):
-    df = stock_data.copy()
-    df['MA5'] = df['Close'].rolling(window=5).mean()
-    df['MA10'] = df['Close'].rolling(window=10).mean()
-    df['MA20'] = df['Close'].rolling(window=20).mean()
-    
-    delta = df['Close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-    rs = gain / loss
-    df['RSI'] = 100 - (100 / (1 + rs))
-    
-    exp1 = df['Close'].ewm(span=12, adjust=False).mean()
-    exp2 = df['Close'].ewm(span=26, adjust=False).mean()
-    df['MACD'] = exp1 - exp2
-    df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
-    
-    df['Middle_BB'] = df['Close'].rolling(window=20).mean()
-    df['Upper_BB'] = df['Middle_BB'] + 2 * df['Close'].rolling(window=20).std()
-    df['Lower_BB'] = df['Middle_BB'] - 2 * df['Close'].rolling(window=20).std()
-    
-    df['Pct_Change'] = df['Close'].pct_change()
-    
-    for i in [1, 2, 3, 5]:
-        df[f'Lag_{i}'] = df['Close'].shift(i)
-    
-    df['Day_of_Week'] = df.index.dayofweek
-    df['Month'] = df.index.month
-    
-    return df.dropna()
+    # Add a stock ticker input
+    ticker = st.text_input('Enter a stock ticker (e.g., AAPL, GOOGL):', 'AAPL')
 
-def create_sequences(data, seq_length):
+    # Add a date range selector
+    start_date = st.date_input('Start date', pd.to_datetime('2020-01-01'))
+    end_date = st.date_input('End date', pd.to_datetime('today'))
+
+    if st.button('Analyze'):
+        # Fetch data
+        data = yf.download(ticker, start=start_date, end=end_date)
+
+        # Your data preparation code here
+
+def prepare_stock_data(df, ticker):
+    # Select data for the given stock
+    stock_data = df[df['company_name'] == ticker].copy()
+    
+    if stock_data.empty:
+        print(f"No data found for ticker {ticker}")
+        return None, None
+    
+    # Sort by date
+    stock_data = stock_data.sort_values('Date')
+    
+    # Select 'Date' and 'Close' columns
+    stock_data = stock_data[['Date', 'Close']]
+    
+    # Set 'Date' as index
+    stock_data.set_index('Date', inplace=True)
+    
+    # Handle missing values (if any)
+    stock_data = stock_data.dropna()
+    
+    if len(stock_data) < 5:
+        print(f"Not enough data points for ticker {ticker}. Need at least 5, but got {len(stock_data)}.")
+        return None, None
+    
+    # Create a 5-day moving average
+    stock_data['MA5'] = stock_data['Close'].rolling(window=5).mean()
+    
+    # Drop rows with NaN values created by the moving average
+    stock_data = stock_data.dropna()
+    
+    if stock_data.empty:
+        print(f"No data left after preprocessing for ticker {ticker}")
+        return None, None
+    
+    # Normalize the data
+    scaler = MinMaxScaler()
+    stock_data_scaled = pd.DataFrame(scaler.fit_transform(stock_data), 
+                                     columns=stock_data.columns, 
+                                     index=stock_data.index)
+    
+    return stock_data_scaled, scaler
+
+# Print unique company names in the DataFrame
+print("Unique company names in the DataFrame:")
+print(df['company_name'].unique())
+
+# Print the number of rows for each company
+print("\nNumber of rows for each company:")
+print(df['company_name'].value_counts())
+
+# Example usage:
+for ticker in df['company_name'].unique():
+    print(f"\nProcessing {ticker}")
+    prepared_data, scaler = prepare_stock_data(df, ticker)
+    
+    if prepared_data is not None:
+        print(prepared_data.head())
+        print("\nShape of prepared data:", prepared_data.shape)
+    else:
+        print("Could not prepare data for this ticker.")
+        # Your model training code here
+
+
+        def create_sequences(data, seq_length):
     X, y = [], []
     for i in range(len(data) - seq_length):
         X.append(data[i:(i + seq_length), :])
-        y.append(data[i + seq_length, 0])
+        y.append(data[i + seq_length, 0])  # Predict only the closing price
     return np.array(X), np.array(y)
 
-def create_model(input_shape):
+def create_and_train_model(data, ticker):
+    # Separate features and target
+    features = data.drop('Close', axis=1)
+    target = data['Close']
+
+    # Normalize the features
+    scaler_features = MinMaxScaler()
+    scaled_features = scaler_features.fit_transform(features)
+
+    # Normalize the target
+    scaler_target = MinMaxScaler()
+    scaled_target = scaler_target.fit_transform(target.values.reshape(-1, 1))
+
+    # Combine scaled features and target
+    scaled_data = np.hstack((scaled_target, scaled_features))
+
+    # Create sequences
+    seq_length = 60
+    X, y = create_sequences(scaled_data, seq_length)
+
+    # Split the data
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
+
+    # Define the model
     model = Sequential([
-        LSTM(50, return_sequences=True, input_shape=input_shape),
+        LSTM(50, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])),
         Dropout(0.2),
         LSTM(50, return_sequences=False),
         Dropout(0.2),
         Dense(25),
         Dense(1)
     ])
+
+    # Compile the model
     model.compile(optimizer=Adam(learning_rate=0.001), loss='mean_squared_error')
-    return model
 
-def predict_stock_price(data, model, scaler):
-    last_sequence = data[-60:].reshape(1, 60, -1)
-    predicted_price = model.predict(last_sequence)
-    return scaler.inverse_transform(predicted_price)[0, 0]
+    # Train the model
+    history = model.fit(
+        X_train, y_train,
+        validation_data=(X_test, y_test),
+        epochs=50,
+        batch_size=32,
+        verbose=1
+    )
 
-def implement_strategy(data, predictions):
+    # Make predictions
+    train_predict = model.predict(X_train)
+    test_predict = model.predict(X_test)
+
+    # Inverse transform predictions
+    train_predict = scaler_target.inverse_transform(train_predict)
+    test_predict = scaler_target.inverse_transform(test_predict)
+    y_train_actual = scaler_target.inverse_transform(y_train.reshape(-1, 1))
+    y_test_actual = scaler_target.inverse_transform(y_test.reshape(-1, 1))
+
+    return model, history, train_predict, test_predict, y_train_actual, y_test_actual
+
+# Train model for each stock
+for ticker, data in engineered_data.items():
+    print(f"\nTraining model for {ticker}")
+    model, history, train_predict, test_predict, y_train_actual, y_test_actual = create_and_train_model(data, ticker)
+    
+    # Print some results
+    print(f"Train MSE: {np.mean((y_train_actual - train_predict)**2):.4f}")
+    print(f"Test MSE: {np.mean((y_test_actual - test_predict)**2):.4f}")
+
+        # Your backtesting code here
+
+    def implement_strategy(data, predictions):
+    """Implement a simple trading strategy based on predictions."""
+    # Ensure predictions and data are aligned
+    predictions = pd.Series(predictions.flatten(), index=data.index[-len(predictions):])
+    
     buy_signals = predictions > data['Close'].shift(1)
     sell_signals = predictions < data['Close'].shift(1)
     return pd.Series(np.where(buy_signals, 1, np.where(sell_signals, -1, 0)), index=predictions.index)
 
 def backtest_strategy(data, signals, initial_capital=10000):
+    """Backtest the trading strategy."""
     position = signals.cumsum()
     holdings = position * data['Close']
     cash = initial_capital - (signals.diff().fillna(0) * data['Close']).cumsum()
@@ -83,99 +182,60 @@ def backtest_strategy(data, signals, initial_capital=10000):
     return total_holdings, returns
 
 def calculate_metrics(returns, risk_free_rate=0.02):
+    """Calculate performance metrics."""
     total_return = (returns + 1).prod() - 1
     annualized_return = (1 + total_return) ** (252 / len(returns)) - 1
     annualized_volatility = returns.std() * np.sqrt(252)
     sharpe_ratio = (annualized_return - risk_free_rate) / annualized_volatility
-    max_drawdown = (returns.cumsum() - returns.cumsum().cummax()).min()
     return {
         'Total Return': total_return,
         'Annualized Return': annualized_return,
         'Annualized Volatility': annualized_volatility,
-        'Sharpe Ratio': sharpe_ratio,
-        'Max Drawdown': max_drawdown
+        'Sharpe Ratio': sharpe_ratio
     }
 
-st.title('Stock Price Prediction and Trading Strategy')
-
-st.markdown("""
-## About Stock Trading
-
-Stock trading involves buying and selling shares of publicly traded companies. Here are some key concepts:
-
-- **Open**: The price at which a stock starts trading when the market opens.
-- **Close**: The final price of a stock when the market closes.
-- **High**: The highest price a stock reaches during a trading session.
-- **Low**: The lowest price a stock reaches during a trading session.
-- **Volume**: The number of shares traded during a given time period.
-- **Market Cap**: The total value of a company's outstanding shares.
-
-**Disclaimer**: Stock price predictions are based on historical data and machine learning models. 
-They should not be considered as financial advice. The stock market is inherently unpredictable 
-and involves risk. Always do your own research and consider consulting with a financial advisor 
-before making investment decisions.
-""")
-
-ticker = st.text_input('Enter Stock Ticker', 'AAPL')
-start_date = st.date_input('Start Date', pd.to_datetime('2020-01-01'))
-end_date = st.date_input('End Date', pd.to_datetime('today'))
-
-if st.button('Analyze'):
-    data = fetch_stock_data(ticker, start_date, end_date)
+# Implement strategy and backtest for each stock
+for ticker, data in engineered_data.items():
+    print(f"\nBacktesting strategy for {ticker}")
     
-    st.subheader('Stock Price History')
-    fig = go.Figure(data=[go.Candlestick(
-        x=data.index,
-        open=data['Open'],
-        high=data['High'],
-        low=data['Low'],
-        close=data['Close']
-    )])
-    fig.update_layout(height=600)
-    st.plotly_chart(fig, use_container_width=True)
+    # Train the model and get predictions
+    model, _, _, test_predict, _, y_test_actual = create_and_train_model(data, ticker)
     
-    engineered_data = engineer_features(data)
+    # Implement strategy
+    test_data = data.iloc[-len(test_predict):]
+    signals = implement_strategy(test_data, test_predict)
     
-    scaler = MinMaxScaler()
-    scaled_data = scaler.fit_transform(engineered_data)
+    # Backtest strategy
+    total_holdings, returns = backtest_strategy(test_data, signals)
     
-    seq_length = 60
-    X, y = create_sequences(scaled_data, seq_length)
-    
-    model = create_model((X.shape[1], X.shape[2]))
-    model.fit(X, y, epochs=50, batch_size=32, verbose=0)
-    
-    predictions = []
-    for i in range(len(engineered_data) - seq_length):
-        seq = scaled_data[i:i+seq_length]
-        prediction = model.predict(seq.reshape(1, seq_length, -1))
-        predictions.append(scaler.inverse_transform(prediction)[0, 0])
-    
-    predictions = pd.Series(predictions, index=engineered_data.index[seq_length:])
-    
-    st.subheader('Price Predictions')
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=data.index, y=data['Close'], mode='lines', name='Actual'))
-    fig.add_trace(go.Scatter(x=predictions.index, y=predictions, mode='lines', name='Predicted'))
-    fig.update_layout(height=600)
-    st.plotly_chart(fig, use_container_width=True)
-    
-    signals = implement_strategy(engineered_data, predictions)
-    total_holdings, returns = backtest_strategy(engineered_data, signals)
-    
-    st.subheader('Trading Strategy Performance')
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=total_holdings.index, y=total_holdings, mode='lines', name='Strategy'))
-    fig.add_trace(go.Scatter(x=data.index, y=(data['Close'] / data['Close'].iloc[0]) * 10000, mode='lines', name='Buy and Hold'))
-    fig.update_layout(height=600)
-    st.plotly_chart(fig, use_container_width=True)
-    
+    # Calculate metrics
     metrics = calculate_metrics(returns)
-    st.subheader('Performance Metrics')
-    for metric, value in metrics.items():
-        st.write(f"{metric}: {value:.4f}")
     
-    st.markdown("""
-    **Note**: These predictions and strategy results are for educational purposes only. 
-    Do not use them as the sole basis for investment decisions. Past performance does not guarantee future results.
-    """)
+    # Print metrics
+    for metric, value in metrics.items():
+        print(f"{metric}: {value:.4f}")
+    
+    # Visualize results
+    plt.figure(figsize=(15, 7))
+    plt.plot(total_holdings, label='Strategy')
+    plt.plot((test_data['Close'] / test_data['Close'].iloc[0]) * 10000, label='Buy and Hold')
+    plt.title(f'{ticker} - Strategy vs Buy and Hold', fontsize=16)
+    plt.xlabel('Date', fontsize=14)
+    plt.ylabel('Portfolio Value ($)', fontsize=14)
+    plt.legend(fontsize=12)
+    plt.grid(True, linestyle='--', alpha=0.6)
+    plt.tight_layout()
+    plt.show()
+
+        # Display results
+        st.subheader('Stock Price Prediction Results')
+        st.line_chart(data['Close'])
+
+        st.subheader('Model Performance Metrics')
+        # Display your metrics here
+
+        st.subheader('Trading Strategy Performance')
+        # Display your trading strategy results here
+
+if __name__ == '__main__':
+    main()
