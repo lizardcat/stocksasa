@@ -18,57 +18,6 @@ data = yf.download(ticker, start='2010-01-01', end='2023-01-01')
 st.write('Displaying stock data:')
 st.dataframe(data.tail())
 
-# Plotting stock prices
-st.write(f'Closing Price Trend for {ticker}')
-fig, ax = plt.subplots()
-ax.plot(data['Close'])
-st.pyplot(fig)
-
-# Feature Engineering with Technical Indicators
-data['SMA'] = data['Close'].rolling(window=15).mean()
-data['EMA'] = data['Close'].ewm(span=15, adjust=False).mean()  # Exponential Moving Average
-data['RSI'] = compute_rsi(data['Close'], 14)  # Relative Strength Index
-
-def compute_rsi(data, window):
-    diff = data.diff(1).dropna()
-    gain = (diff.where(diff > 0, 0).sum())/window
-    loss = (-diff.where(diff < 0, 0).sum())/window
-    rs = gain/loss
-    return 100 - 100 / (1 + rs)
-
-# Prepare features and target variable
-data['target'] = data['Close'].shift(-1) > data['Close']
-data.dropna(inplace=True)  # Remove any rows with NaN values
-
-# User input for model selection
-model_type = st.selectbox('Choose the model type:', ['Random Forest', 'SVM'])
-
-# Split data into train and test sets
-X_train, X_test, y_train, y_test = train_test_split(data[['SMA']], data['Close'], test_size=0.2, random_state=42)
-model = RandomForestClassifier()
-model.fit(X_train, y_train)
-
-# Model evaluation
-predictions = model.predict(X_test)
-st.write('Model Evaluation:')
-st.text(classification_report(y_test, predictions))
-
-# Trading strategy based on model predictions
-def trading_strategy(data, model):
-    # Buy when the predicted probability of the price going up is high, sell otherwise
-    predictions = model.predict_proba(data)[:, 1] > 0.6
-    data['trades'] = predictions
-    
-    data['strategy'] = data['trades'].shift(1) * data['Close']
-    returns = data['strategy'].pct_change(1)
-    
-    return returns
-
-# Calculate and display strategy returns
-returns = trading_strategy(X_test, model)
-st.write('Strategy Returns:')
-st.line_chart(returns.cumsum())
-
 ### About This Application
 This application demonstrates a machine learning approach to predicting stock market trends. It uses historical stock price data to train a model that aims to predict future price movements. Users can select different stocks and model types to see how different scenarios might perform.
 
