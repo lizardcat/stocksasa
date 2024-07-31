@@ -1,76 +1,87 @@
-# App.py
-
 import streamlit as st
 import pandas as pd
-import plotly.graph_objects as go
-from model import fetch_stock_info, fetch_stock_history, generate_stock_prediction
+import yfinance as yf
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import classification_report
 
-st.set_page_config(page_title="Stock Prediction App", page_icon="📈")
+st.sidebar.header('About')
+st.sidebar.write('This section can contain basic information about stock trading, the purpose of the app, and user guidelines.')
 
-##### Sidebar Start #####
+st.sidebar.header('Disclaimer')
+st.sidebar.write('This application is for educational purposes only and does not constitute financial advice.')
 
-st.sidebar.markdown("## **User Input Features**")
 
-stock_ticker = "^GSPC"  # S&P 500 Ticker
+# Title and introductory text
+st.title('Stock Market Prediction Application')
+st.write('This application predicts stock market trends using historical data and machine learning.')
 
-st.sidebar.markdown("### **Stock ticker**")
-st.sidebar.text_input(label="Stock ticker code", placeholder=stock_ticker, disabled=True)
+# User input for stock selection
+ticker = st.text_input('Enter the stock ticker symbol, e.g., AAPL, GOOGL, MSFT:', 'AAPL')
+data = yf.download(ticker, start='2010-01-01', end='2023-01-01')
 
-periods = {
-    "1d": ["1m", "2m", "5m", "15m", "30m", "60m", "90m"],
-    "5d": ["1m", "2m", "5m", "15m", "30m", "60m", "90m"],
-    "1mo": ["30m", "60m", "90m", "1d"],
-    "3mo": ["1d", "5d", "1wk", "1mo"],
-    "6mo": ["1d", "5d", "1wk", "1mo"],
-    "1y": ["1d", "5d", "1wk", "1mo"],
-    "2y": ["1d", "5d", "1wk", "1mo"],
-    "5y": ["1d", "5d", "1wk", "1mo"],
-    "10y": ["1d", "5d", "1wk", "1mo"],
-    "max": ["1d", "5d", "1wk", "1mo"],
-}
+# Displaying the data as a dataframe
+st.write('Displaying stock data:')
+st.dataframe(data.tail())
 
-st.sidebar.markdown("### **Select period**")
-period = st.sidebar.selectbox("Choose a period", list(periods.keys()))
+# Plotting stock prices
+st.write(f'Closing Price Trend for {ticker}')
+fig, ax = plt.subplots()
+ax.plot(data['Close'])
+st.pyplot(fig)
 
-st.sidebar.markdown("### **Select interval**")
-interval = st.sidebar.selectbox("Choose an interval", periods[period])
+# Feature Engineering with Technical Indicators
+data['SMA'] = data['Close'].rolling(window=15).mean()
+data['EMA'] = data['Close'].ewm(span=15, adjust=False).mean()  # Exponential Moving Average
+data['RSI'] = compute_rsi(data['Close'], 14)  # Relative Strength Index
 
-##### Sidebar End #####
+def compute_rsi(data, window):
+    diff = data.diff(1).dropna()
+    gain = (diff.where(diff > 0, 0).sum())/window
+    loss = (-diff.where(diff < 0, 0).sum())/window
+    rs = gain/loss
+    return 100 - 100 / (1 + rs)
 
-##### Title #####
+# Prepare features and target variable
+data['target'] = data['Close'].shift(-1) > data['Close']
+data.dropna(inplace=True)  # Remove any rows with NaN values
 
-st.markdown("# **Stock Price Prediction**")
-st.markdown("##### **Enhance Investment Decisions through Data-Driven Forecasting**")
+# User input for model selection
+model_type = st.selectbox('Choose the model type:', ['Random Forest', 'SVM'])
 
-##### Title End #####
+# Split data into train and test sets
+X_train, X_test, y_train, y_test = train_test_split(data[['SMA']], data['Close'], test_size=0.2, random_state=42)
+model = RandomForestClassifier()
+model.fit(X_train, y_train)
 
-# Fetch the stock historical data
-stock_data = fetch_stock_history(stock_ticker, period, interval)
+# Model evaluation
+predictions = model.predict(X_test)
+st.write('Model Evaluation:')
+st.text(classification_report(y_test, predictions))
 
-##### Historical Data Graph #####
+# Trading strategy based on model predictions
+def trading_strategy(data, model):
+    # Buy when the predicted probability of the price going up is high, sell otherwise
+    predictions = model.predict_proba(data)[:, 1] > 0.6
+    data['trades'] = predictions
+    
+    data['strategy'] = data['trades'].shift(1) * data['Close']
+    returns = data['strategy'].pct_change(1)
+    
+    return returns
 
-st.markdown("## **Historical Data**")
+# Calculate and display strategy returns
+returns = trading_strategy(X_test, model)
+st.write('Strategy Returns:')
+st.line_chart(returns.cumsum())
 
-fig = go.Figure(data=[go.Candlestick(
-    x=stock_data.index,
-    open=stock_data['Open'],
-    high=stock_data['High'],
-    low=stock_data['Low'],
-    close=stock_data['Close'],
-)])
+### About This Application
+This application demonstrates a machine learning approach to predicting stock market trends. It uses historical stock price data to train a model that aims to predict future price movements. Users can select different stocks and model types to see how different scenarios might perform.
 
-fig.update_xaxes(type="category")
-fig.update_layout(height=600)
+### Educational Purpose
+This application is designed for educational purposes to help users understand how machine learning can be applied in financial contexts. It allows users to experiment with different stocks and indicators and see simulated outcomes based on historical data.
 
-st.plotly_chart(fig, use_container_width=True)
+### Disclaimer
+This application is not intended to provide financial advice. The predictions and strategies generated by this application are based on historical data and should not be taken as guidance for real-world trading. Stock market investments carry risk, and users should consult with professional financial advisors before making investment decisions.
 
-##### Historical Data Graph End #####
-
-##### Stock Information #####
-
-st.markdown("## **Stock Information**")
-
-stock_info = fetch_stock_info(stock_ticker)
-for key, value in stock_info.items():
-    st.markdown(f"### **{key}**")
-    st.table
