@@ -1,151 +1,181 @@
 import streamlit as st
 import pandas as pd
-import math
-from pathlib import Path
+import numpy as np
+import plotly.graph_objects as go
+import yfinance as yf
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
+from tensorflow.keras.optimizers import Adam
 
-# Set the title and favicon that appear in the Browser's tab bar.
-st.set_page_config(
-    page_title='GDP dashboard',
-    page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
-)
-
-# -----------------------------------------------------------------------------
-# Declare some useful functions.
+st.set_page_config(page_title="Stock Prediction App", page_icon="📈")
 
 @st.cache_data
-def get_gdp_data():
-    """Grab GDP data from a CSV file.
+def fetch_stock_data(ticker, start_date, end_date):
+    return yf.download(ticker, start=start_date, end=end_date)
 
-    This uses caching to avoid having to read the file every time. If we were
-    reading from an HTTP endpoint instead of a file, it's a good idea to set
-    a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
-    """
+def engineer_features(stock_data):
+    df = stock_data.copy()
+    df['MA5'] = df['Close'].rolling(window=5).mean()
+    df['MA10'] = df['Close'].rolling(window=10).mean()
+    df['MA20'] = df['Close'].rolling(window=20).mean()
+    
+    delta = df['Close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / loss
+    df['RSI'] = 100 - (100 / (1 + rs))
+    
+    exp1 = df['Close'].ewm(span=12, adjust=False).mean()
+    exp2 = df['Close'].ewm(span=26, adjust=False).mean()
+    df['MACD'] = exp1 - exp2
+    df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
+    
+    df['Middle_BB'] = df['Close'].rolling(window=20).mean()
+    df['Upper_BB'] = df['Middle_BB'] + 2 * df['Close'].rolling(window=20).std()
+    df['Lower_BB'] = df['Middle_BB'] - 2 * df['Close'].rolling(window=20).std()
+    
+    df['Pct_Change'] = df['Close'].pct_change()
+    
+    for i in [1, 2, 3, 5]:
+        df[f'Lag_{i}'] = df['Close'].shift(i)
+    
+    df['Day_of_Week'] = df.index.dayofweek
+    df['Month'] = df.index.month
+    
+    return df.dropna()
 
-    # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
-    DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
-    raw_gdp_df = pd.read_csv(DATA_FILENAME)
+def create_sequences(data, seq_length):
+    X, y = [], []
+    for i in range(len(data) - seq_length):
+        X.append(data[i:(i + seq_length), :])
+        y.append(data[i + seq_length, 0])
+    return np.array(X), np.array(y)
 
-    MIN_YEAR = 1960
-    MAX_YEAR = 2022
+def create_model(input_shape):
+    model = Sequential([
+        LSTM(50, return_sequences=True, input_shape=input_shape),
+        Dropout(0.2),
+        LSTM(50, return_sequences=False),
+        Dropout(0.2),
+        Dense(25),
+        Dense(1)
+    ])
+    model.compile(optimizer=Adam(learning_rate=0.001), loss='mean_squared_error')
+    return model
 
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
-    gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
-        [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
-        'Year',
-        'GDP',
-    )
+def predict_stock_price(data, model, scaler):
+    last_sequence = data[-60:].reshape(1, 60, -1)
+    predicted_price = model.predict(last_sequence)
+    return scaler.inverse_transform(predicted_price)[0, 0]
 
-    # Convert years from string to integers
-    gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
+def implement_strategy(data, predictions):
+    buy_signals = predictions > data['Close'].shift(1)
+    sell_signals = predictions < data['Close'].shift(1)
+    return pd.Series(np.where(buy_signals, 1, np.where(sell_signals, -1, 0)), index=predictions.index)
 
-    return gdp_df
+def backtest_strategy(data, signals, initial_capital=10000):
+    position = signals.cumsum()
+    holdings = position * data['Close']
+    cash = initial_capital - (signals.diff().fillna(0) * data['Close']).cumsum()
+    total_holdings = holdings + cash
+    returns = total_holdings.pct_change()
+    return total_holdings, returns
 
-gdp_df = get_gdp_data()
+def calculate_metrics(returns, risk_free_rate=0.02):
+    total_return = (returns + 1).prod() - 1
+    annualized_return = (1 + total_return) ** (252 / len(returns)) - 1
+    annualized_volatility = returns.std() * np.sqrt(252)
+    sharpe_ratio = (annualized_return - risk_free_rate) / annualized_volatility
+    max_drawdown = (returns.cumsum() - returns.cumsum().cummax()).min()
+    return {
+        'Total Return': total_return,
+        'Annualized Return': annualized_return,
+        'Annualized Volatility': annualized_volatility,
+        'Sharpe Ratio': sharpe_ratio,
+        'Max Drawdown': max_drawdown
+    }
 
-# -----------------------------------------------------------------------------
-# Draw the actual page
+st.title('Stock Price Prediction and Trading Strategy')
 
-# Set the title that appears at the top of the page.
-'''
-# :earth_americas: GDP dashboard
+st.markdown("""
+## About Stock Trading
 
-Browse GDP data from the [World Bank Open Data](https://data.worldbank.org/) website. As you'll
-notice, the data only goes to 2022 right now, and datapoints for certain years are often missing.
-But it's otherwise a great (and did I mention _free_?) source of data.
-'''
+Stock trading involves buying and selling shares of publicly traded companies. Here are some key concepts:
 
-# Add some spacing
-''
-''
+- **Open**: The price at which a stock starts trading when the market opens.
+- **Close**: The final price of a stock when the market closes.
+- **High**: The highest price a stock reaches during a trading session.
+- **Low**: The lowest price a stock reaches during a trading session.
+- **Volume**: The number of shares traded during a given time period.
+- **Market Cap**: The total value of a company's outstanding shares.
 
-min_value = gdp_df['Year'].min()
-max_value = gdp_df['Year'].max()
+**Disclaimer**: Stock price predictions are based on historical data and machine learning models. 
+They should not be considered as financial advice. The stock market is inherently unpredictable 
+and involves risk. Always do your own research and consider consulting with a financial advisor 
+before making investment decisions.
+""")
 
-from_year, to_year = st.slider(
-    'Which years are you interested in?',
-    min_value=min_value,
-    max_value=max_value,
-    value=[min_value, max_value])
+ticker = st.text_input('Enter Stock Ticker', 'AAPL')
+start_date = st.date_input('Start Date', pd.to_datetime('2020-01-01'))
+end_date = st.date_input('End Date', pd.to_datetime('today'))
 
-countries = gdp_df['Country Code'].unique()
-
-if not len(countries):
-    st.warning("Select at least one country")
-
-selected_countries = st.multiselect(
-    'Which countries would you like to view?',
-    countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
-
-''
-''
-''
-
-# Filter the data
-filtered_gdp_df = gdp_df[
-    (gdp_df['Country Code'].isin(selected_countries))
-    & (gdp_df['Year'] <= to_year)
-    & (from_year <= gdp_df['Year'])
-]
-
-st.header('GDP over time', divider='gray')
-
-''
-
-st.line_chart(
-    filtered_gdp_df,
-    x='Year',
-    y='GDP',
-    color='Country Code',
-)
-
-''
-''
-
-
-first_year = gdp_df[gdp_df['Year'] == from_year]
-last_year = gdp_df[gdp_df['Year'] == to_year]
-
-st.header(f'GDP in {to_year}', divider='gray')
-
-''
-
-cols = st.columns(4)
-
-for i, country in enumerate(selected_countries):
-    col = cols[i % len(cols)]
-
-    with col:
-        first_gdp = first_year[gdp_df['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[gdp_df['Country Code'] == country]['GDP'].iat[0] / 1000000000
-
-        if math.isnan(first_gdp):
-            growth = 'n/a'
-            delta_color = 'off'
-        else:
-            growth = f'{last_gdp / first_gdp:,.2f}x'
-            delta_color = 'normal'
-
-        st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
-            delta=growth,
-            delta_color=delta_color
-        )
+if st.button('Analyze'):
+    data = fetch_stock_data(ticker, start_date, end_date)
+    
+    st.subheader('Stock Price History')
+    fig = go.Figure(data=[go.Candlestick(
+        x=data.index,
+        open=data['Open'],
+        high=data['High'],
+        low=data['Low'],
+        close=data['Close']
+    )])
+    fig.update_layout(height=600)
+    st.plotly_chart(fig, use_container_width=True)
+    
+    engineered_data = engineer_features(data)
+    
+    scaler = MinMaxScaler()
+    scaled_data = scaler.fit_transform(engineered_data)
+    
+    seq_length = 60
+    X, y = create_sequences(scaled_data, seq_length)
+    
+    model = create_model((X.shape[1], X.shape[2]))
+    model.fit(X, y, epochs=50, batch_size=32, verbose=0)
+    
+    predictions = []
+    for i in range(len(engineered_data) - seq_length):
+        seq = scaled_data[i:i+seq_length]
+        prediction = model.predict(seq.reshape(1, seq_length, -1))
+        predictions.append(scaler.inverse_transform(prediction)[0, 0])
+    
+    predictions = pd.Series(predictions, index=engineered_data.index[seq_length:])
+    
+    st.subheader('Price Predictions')
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=data.index, y=data['Close'], mode='lines', name='Actual'))
+    fig.add_trace(go.Scatter(x=predictions.index, y=predictions, mode='lines', name='Predicted'))
+    fig.update_layout(height=600)
+    st.plotly_chart(fig, use_container_width=True)
+    
+    signals = implement_strategy(engineered_data, predictions)
+    total_holdings, returns = backtest_strategy(engineered_data, signals)
+    
+    st.subheader('Trading Strategy Performance')
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=total_holdings.index, y=total_holdings, mode='lines', name='Strategy'))
+    fig.add_trace(go.Scatter(x=data.index, y=(data['Close'] / data['Close'].iloc[0]) * 10000, mode='lines', name='Buy and Hold'))
+    fig.update_layout(height=600)
+    st.plotly_chart(fig, use_container_width=True)
+    
+    metrics = calculate_metrics(returns)
+    st.subheader('Performance Metrics')
+    for metric, value in metrics.items():
+        st.write(f"{metric}: {value:.4f}")
+    
+    st.markdown("""
+    **Note**: These predictions and strategy results are for educational purposes only. 
+    Do not use them as the sole basis for investment decisions. Past performance does not guarantee future results.
+    """)
