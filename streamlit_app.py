@@ -6,13 +6,6 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report
 
-st.sidebar.header('About')
-st.sidebar.write('This section can contain basic information about stock trading, the purpose of the app, and user guidelines.')
-
-st.sidebar.header('Disclaimer')
-st.sidebar.write('This application is for educational purposes only and does not constitute financial advice.')
-
-
 # Title and introductory text
 st.title('Stock Market Prediction Application')
 st.write('This application predicts stock market trends using historical data and machine learning.')
