@@ -1,0 +1,35 @@
+# API keys and environment settings
+.env
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.ipynb_checkpoints/
+
+# Virtual environment
+.venv/
+env/
+venv/
+
+# Logs and temp files
+*.log
+*.tmp
+*.bak
+
+# Data exports or caches
+*.csv
+*.xlsx
+*.parquet
+
+# Python dependencies
+*.egg-info/
+
+# Model artifacts
+models/*.pkl
+models/*.joblib
+
+# Image previews (optional)
+*.png
+*.jpg

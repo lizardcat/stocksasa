@@ -1,0 +1,4 @@
+{
+    "stocks": ["AAPL", "TSLA", "AMZN", "SCOM.NR"],
+    "indices": ["^GSPC", "^DJI", "^IXIC", "^FTSE", "^N225"]
+}
