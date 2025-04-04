@@ -27,9 +27,6 @@ venv/
 # Python dependencies
 *.egg-info/
 
-# Model artifacts
-models/*.pkl
-models/*.joblib
 
 # Image previews (optional)
 *.png
