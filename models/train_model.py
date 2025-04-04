@@ -11,7 +11,7 @@ def train_model(df: pd.DataFrame, save_model: bool = True, model_path: str = "mo
     Train a Random Forest classifier to predict stock trend (up/down).
     
     Features used:
-    - Daily_Return, MA_5, STD_5, Lag_1, is_tariff_day
+    - Daily_Return, MA_5, STD_5, Lag_1, is_tariff_day, is_earnings_day, is_monetary_policy_day
     
     Target:
     - 1 if next day's Close > today's Close, else 0
