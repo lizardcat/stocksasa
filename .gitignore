@@ -20,6 +20,7 @@ venv/
 
 # Data exports or caches
 *.csv
+!data/events.csv
 *.xlsx
 *.parquet
 
