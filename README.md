@@ -17,6 +17,10 @@ Built with:
 - Export historical data as CSV
 - Automatically update macroeconomic events with `update_events.py`
 
+## Live Demo
+
+You can see a live demo of the app on Streamlit here: https://stocksasa.streamlit.app/
+
 ## Installation
 
 Clone the repo and install requirements:
