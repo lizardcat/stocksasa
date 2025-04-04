@@ -10,7 +10,7 @@ from data.add_event_flags import add_event_flags
 
 st.set_page_config(page_title="Stocksasa AI", layout="wide")
 
-st.title("📊 AI Stock Market Trend Predictor")
+st.title("📊 Stocksasa - AI Stock Market Trend Predictor")
 
 # === Popular Tickers Dropdown ===
 popular_tickers = {

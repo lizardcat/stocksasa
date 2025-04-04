@@ -1,4 +1,4 @@
-# Stocksasa AI — Market Trend Prediction App
+# Stocksasa - A Simple AI Market Trend Prediction App
 
 **Stocksasa** is a stock trend prediction system powered by AI. It uses historical market data, technical indicators, and macroeconomic event analysis (like tariffs and interest rate changes) to predict whether a stock or index is likely to go up or down the next day.
 
