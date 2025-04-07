@@ -11,7 +11,7 @@ Built with:
 
 ## Features
 
-- Predicts up/down movement for any stock or index
+- Predicts up/down movement for any stock or index (only 12 are implemented currently but more can be added)
 - Visualizes recent trends and AI predictions
 - Learns from technical indicators + global event flags
 - Export historical data as CSV
@@ -20,6 +20,13 @@ Built with:
 ## Live Demo
 
 You can see a live demo of the app on Streamlit here: https://stocksasa.streamlit.app/
+
+## Screenshots 
+### 1. Current Market Outlook
+![](/assets/stocksasa_1.png)
+
+### 2. AI Market Prediction for S&P500
+![](/assets/stocksasa_2.png)
 
 ## Installation
 
