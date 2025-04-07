@@ -27,7 +27,3 @@ venv/
 # Python dependencies
 *.egg-info/
 
-
-# Image previews (optional)
-*.png
-*.jpg
